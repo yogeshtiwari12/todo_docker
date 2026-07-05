@@ -1,32 +1,37 @@
-# Multi-stage Dockerfile for Next.js app with Prisma
-FROM node:18-bullseye-slim AS builder
+# Multi-stage Dockerfile for Railway-ready Next.js app with Prisma
+FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 
-# Install pnpm
-RUN npm install -g pnpm@8
+RUN corepack enable && corepack prepare pnpm@9.15.5 --activate
 
-# Copy lockfiles and install deps (use frozen lockfile for reproducible builds)
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# Copy source and build
-COPY . .
-RUN pnpm build
+FROM node:20-bookworm-slim AS builder
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
 
-FROM node:18-bullseye-slim AS runner
+RUN corepack enable && corepack prepare pnpm@9.15.5 --activate
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+RUN pnpm prisma generate
+RUN pnpm build
+RUN pnpm prune --prod
+
+FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
 
-# Install pnpm so we can run production commands
-RUN npm install -g pnpm@8
-
-# Copy built artifacts and production deps from builder
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 
 EXPOSE 3000
 
-# Ensure Prisma client is generated and migrations are applied on container start
-CMD ["sh", "-lc", "pnpm prisma generate && pnpm prisma migrate deploy || true && pnpm start"]
+CMD ["sh", "-lc", "node_modules/.bin/next start -p ${PORT:-3000}"]
