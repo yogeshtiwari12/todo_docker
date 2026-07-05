@@ -1,0 +1,11 @@
+.next
+node_modules
+pnpm-lock.yaml
+.env
+.env.*
+.git
+.github
+README.md
+dist
+coverage
+**/node_modules
